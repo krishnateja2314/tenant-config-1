@@ -28,12 +28,6 @@ app.use("/api/admin", authRoutes);
 app.get("/", (req, res) => {
   res.send("Backend running");
 });
-// (Optional test)
-const test = async () => {
-  const data = await AuthConfig.find();
-  console.log("AuthConfigs:", data);
-};
-test();
 
 // MongoDB connection
 mongoose
