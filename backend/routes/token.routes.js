@@ -11,7 +11,7 @@ router.post("/token", async (req, res) => {
 
         const client = await Client.findOne({ clientId });
 
-        if (!client || !(await bcrypt.compare(clientSecret, client.clientSecret))) {
+        if (!client || client.clientSecret !== clientSecret) {
             return res.status(401).json({
                 success: false,
                 message: "Invalid client credentials"
@@ -25,7 +25,7 @@ router.post("/token", async (req, res) => {
                 message: "IP not allowed"
             });
         }
-        // 🔐 Generate JWT
+        // Generate JWT
         const token = generateServiceToken({
             service: client.clientId,
             scope: client.scope

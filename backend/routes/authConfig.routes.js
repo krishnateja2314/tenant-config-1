@@ -25,7 +25,7 @@ const logger = {
   },
 };
 
-// ✅ GET auth config (with auto-generation)
+// Get auth config (auto-create if missing)
 router.get("/:tenantId", async (req, res) => {
   const { tenantId: requestedTenant } = req.params;
   const userTenant = req.user?.tenantId;
@@ -50,7 +50,7 @@ router.get("/:tenantId", async (req, res) => {
 
     let config = await AuthConfig.findOne({ tenantId });
 
-    // 🔥 If no config exists, generate a default one and save it
+    // Create default config if missing
     if (!config) {
       logger.info("No config found for tenant. Generating default config...", {
         requestedTenant,
@@ -86,7 +86,7 @@ router.get("/:tenantId", async (req, res) => {
       });
     }
 
-    // 🔥 Transform DB → Frontend format (works for both fetched and newly created configs)
+    // Map DB config to frontend response
     const response = {
       tenantId: config.tenantId.toString(),
       passwordEnabled: config.loginMethods.emailPassword,
@@ -121,7 +121,7 @@ router.get("/:tenantId", async (req, res) => {
   }
 });
 
-// ✅ UPDATE (or CREATE if not exists)
+// Update config (create if missing)
 router.put("/:tenantId", async (req, res) => {
   const { tenantId: requestedTenant } = req.params;
   const userTenant = req.user?.tenantId;
@@ -159,7 +159,7 @@ router.put("/:tenantId", async (req, res) => {
 
     const body = req.body;
 
-    // 🔥 Transform Frontend → DB
+    // Map frontend payload to DB shape
     const updateData = {
       tenantId,
       loginMethods: {
@@ -191,7 +191,7 @@ router.put("/:tenantId", async (req, res) => {
       { new: true, upsert: true },
     );
 
-    // 🔥 Transform DB → Frontend (IMPORTANT)
+    // Map DB config to frontend response
     const response = {
       tenantId: updated.tenantId.toString(),
       passwordEnabled: updated.loginMethods.emailPassword,
@@ -226,7 +226,7 @@ router.put("/:tenantId", async (req, res) => {
   }
 });
 
-// ✅ VALIDATE config
+// Validate config payload
 router.post("/validate", async (req, res) => {
   logger.info("Initiating payload validation");
 
@@ -246,24 +246,24 @@ router.post("/validate", async (req, res) => {
       lockoutDurationMinutes,
     } = payload;
 
-    // 🔐 1. At least one auth method
+    // 1) At least one auth method
     if (!passwordEnabled && !ssoEnabled && !otpEnabled) {
       errors.push("At least one authentication method must be enabled.");
     }
 
-    // 🔐 2. MFA dependency
+    // 2) MFA dependency
     if (mfaEnabled && !passwordEnabled && !otpEnabled) {
       errors.push(
         "MFA requires either password or OTP to be enabled as a first factor.",
       );
     }
 
-    // 🔐 3. SSO rules
+    // 3) SSO rules
     if (ssoEnabled && (!allowedRoles || allowedRoles.length === 0)) {
       errors.push("SSO is enabled but no roles are assigned to use it.");
     }
 
-    // 🔐 4. Password policy
+    // 4) Password policy
     if (passwordPolicy.minLength !== undefined) {
       if (passwordPolicy.minLength < 4 || passwordPolicy.minLength > 64) {
         errors.push("Password minimum length must be between 4 and 64.");
@@ -276,28 +276,28 @@ router.post("/validate", async (req, res) => {
       }
     }
 
-    // 🔐 5. Session timeout
+    // 5) Session timeout
     if (sessionTimeoutMinutes !== undefined) {
       if (sessionTimeoutMinutes < 5 || sessionTimeoutMinutes > 1440) {
         errors.push("Session timeout must be between 5 and 1440 minutes.");
       }
     }
 
-    // 🔐 6. Max login attempts
+    // 6) Max login attempts
     if (maxLoginAttempts !== undefined) {
       if (maxLoginAttempts < 1 || maxLoginAttempts > 20) {
         errors.push("Max login attempts must be between 1 and 20.");
       }
     }
 
-    // 🔐 7. Lockout duration
+    // 7) Lockout duration
     if (lockoutDurationMinutes !== undefined) {
       if (lockoutDurationMinutes < 1 || lockoutDurationMinutes > 1440) {
         errors.push("Lockout duration must be between 1 and 1440 minutes.");
       }
     }
 
-    // ✅ FINAL RESPONSE
+    // Final response
     if (errors.length > 0) {
       logger.warn("Payload validation failed", {
         errorCount: errors.length,

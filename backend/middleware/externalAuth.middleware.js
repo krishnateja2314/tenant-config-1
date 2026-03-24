@@ -16,7 +16,7 @@ export const externalAuth = (requiredScope) => {
 
       const decoded = verifyServiceToken(token);
 
-      // 🔐 Scope check
+      // Scope check
       if (!decoded.scope.includes(requiredScope)) {
         return res.status(403).json({
           success: false,

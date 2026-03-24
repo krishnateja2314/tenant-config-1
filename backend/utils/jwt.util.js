@@ -4,7 +4,7 @@ import fs from "fs";
 const privateKey = fs.readFileSync("./keys/private.key");
 const publicKey = fs.readFileSync("./keys/public.key");
 
-// 🔐 Generate token
+// Generate token
 export const generateServiceToken = (payload) => {
   return jwt.sign(payload, privateKey, {
     algorithm: "RS256",
@@ -12,7 +12,7 @@ export const generateServiceToken = (payload) => {
   });
 };
 
-// 🔐 Verify token
+// Verify token
 export const verifyServiceToken = (token) => {
   return jwt.verify(token, publicKey, {
     algorithms: ["RS256"]
