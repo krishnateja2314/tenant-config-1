@@ -9,6 +9,7 @@ import authConfigRoutes from "./routes/authConfig.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
 import externalRoutes from "./routes/external.routes.js";
 import tokenRoutes from "./routes/token.routes.js";
+import domainRoutes from "./routes/domain.routes.js";
 
 dotenv.config();
 const app = express();
@@ -28,6 +29,7 @@ app.use("/api/auth-config", requireAuth, authConfigRoutes);
 app.use("/api/admin", authRoutes);
 app.use("/api/external", externalRoutes);
 app.use("/api/token", tokenRoutes);
+app.use("/api/domains", domainRoutes);
 // Test route
 app.get("/", (req, res) => {
   res.send("Backend running");
