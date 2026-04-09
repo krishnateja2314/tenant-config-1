@@ -29,8 +29,7 @@ app.use("/api/auth-config", requireAuth, authConfigRoutes);
 app.use("/api/admin", authRoutes);
 app.use("/api/external", externalRoutes);
 app.use("/api/token", tokenRoutes);
-app.use("/api/domains", domainRoutes);
-// Test route
+app.use("/api/domains", requireAuth, domainRoutes);// Test route
 app.get("/", (req, res) => {
   res.send("Backend running");
 });
