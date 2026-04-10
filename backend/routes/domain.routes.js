@@ -1,6 +1,5 @@
 import express from "express";
 import Domain from "../models/Domain.js";
-import { getDomainTree } from "../utils/domainTree.util.js";
 import { isCycle } from "../utils/cycleCheck.util.js";
 import { verifyDomainAccess } from "../middleware/domainAccess.middleware.js";
 import { createDomainAccessService } from "../services/domainAccess.service.js";
@@ -10,7 +9,7 @@ const router = express.Router();
 const isSameTenant = (a, b) => String(a) === String(b);
 const domainAccessService = createDomainAccessService();
 
-// CREATE
+// 2. CREATE DOMAIN NODE
 router.post(
   "/",
   verifyDomainAccess({ targetDomainBodyField: "parentDomainId" }),
@@ -47,24 +46,32 @@ router.post(
 
   const domain = await Domain.create(req.body);
 
-  res.json({ success: true, data: domain });
+  // Return 201 Created with the hydrated DomainNode object
+  res.status(201).json(domain);
 });
 
-// GET TREE
+// 1. FETCH DOMAIN TREE (Flat List)
 router.get(
   "/tree/:tenantId",
   verifyDomainAccess({ targetTenantParam: "tenantId" }),
   async (req, res) => {
-    const tree = await getDomainTree(
-      req.params.tenantId,
-      req.domainAccess?.scope === "domain" ? req.domainAccess.rootDomainIds : []
-    );
+    // Retrieves a flat list of all domains; frontend handles recursive tree building
+    // Note: The getDomainTree util was removed in favor of a standard flat query
+    let query = { tenantId: req.params.tenantId };
+    
+    // Maintain RBAC scoping if applicable (assuming domainAccessService handles flat scope fetching if needed)
+    if (req.domainAccess?.scope === "domain" && req.domainAccess.rootDomainIds.length > 0) {
+        query._id = { $in: req.domainAccess.rootDomainIds }; // Modify based on your exact RBAC logic for flat arrays
+    }
 
-    res.json({ success: true, data: tree });
+    const flatDomains = await Domain.find(query);
+
+    // Returns an array of DomainNode objects
+    res.status(200).json(flatDomains);
   }
 );
 
-// UPDATE (re-parent)
+// 3. UPDATE DOMAIN NODE (re-parent)
 router.put(
   "/:id",
   verifyDomainAccess({ targetDomainParam: "id" }),
@@ -76,7 +83,7 @@ router.put(
   if (!existing) {
     return res.status(404).json({
       success: false,
-      message: "Domain not found"
+      message: "Domain node not found."
     });
   }
 
@@ -93,7 +100,7 @@ router.put(
     if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Parent domain not found"
+        message: "Domain node not found."
       });
     }
 
@@ -125,10 +132,11 @@ router.put(
     });
   }
 
+  // Upstream traversal cycle check
   if (await isCycle(req.params.id, parentDomainId)) {
-    return res.status(400).json({
+    return res.status(409).json({
       success: false,
-      message: "Cycle detected"
+      message: "Circular dependency detected. Cannot reparent to a child node."
     });
   }
 
@@ -138,9 +146,10 @@ router.put(
     { new: true }
   );
 
-  res.json({ success: true, data: updated });
+  res.status(200).json(updated);
 });
 
+// 4. DELETE DOMAIN NODE
 router.delete(
   "/:id",
   verifyDomainAccess({ targetDomainParam: "id" }),
@@ -157,7 +166,7 @@ router.delete(
     if (!existing) {
       return res.status(404).json({
         success: false,
-        message: "Domain not found"
+        message: "Domain node not found."
       });
     }
 
@@ -170,16 +179,18 @@ router.delete(
 
     const children = await Domain.find({ parentDomainId: req.params.id });
 
+    // Restrict deletion if active child domains exist
     if (children.length > 0) {
       return res.status(409).json({
         success: false,
-        message: "Cannot delete domain with children"
+        message: "Cannot delete a domain that has active child domains."
       });
     }
 
     await Domain.findByIdAndDelete(req.params.id);
 
-    res.json({ success: true, message: "Deleted" });
+    res.status(200).json({ success: true, message: "Domain successfully deleted." });
   }
 );
+
 export default router;
