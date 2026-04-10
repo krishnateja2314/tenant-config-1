@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import Domain from "../models/Domain.js";
 import { isCycle } from "../utils/cycleCheck.util.js";
 import { verifyDomainAccess } from "../middleware/domainAccess.middleware.js";
@@ -7,6 +8,7 @@ import { createDomainAccessService } from "../services/domainAccess.service.js";
 const router = express.Router();
 
 const isSameTenant = (a, b) => String(a) === String(b);
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const domainAccessService = createDomainAccessService();
 
 // ── Lightweight Structured Logger ──────────────────────────────────────────────
@@ -58,8 +60,15 @@ router.post(
         });
       }
 
-      if (parentDomainId) {
-        const parent = await Domain.findById(parentDomainId).select("tenantId");
+  if (req.body.parentDomainId) {
+    if (!isValidObjectId(req.body.parentDomainId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid parentDomainId format"
+      });
+    }
+
+    const parent = await Domain.findById(req.body.parentDomainId).select("tenantId");
 
         if (!parent) {
           logger.warn("Create domain blocked: parent not found", {
@@ -121,6 +130,13 @@ router.get(
   "/tree/:tenantId",
   verifyDomainAccess({ targetTenantParam: "tenantId" }),
   async (req, res) => {
+    if (!isValidObjectId(req.params.tenantId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid tenantId format"
+      });
+    }
+
     const { tenantId } = req.params;
 
     logger.info("Fetch domain tree request received", {
@@ -172,6 +188,13 @@ router.put(
   "/:id",
   verifyDomainAccess({ targetDomainParam: "id" }),
   async (req, res) => {
+  if (!isValidObjectId(req.params.id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid domain id format"
+    });
+  }
+
     const { parentDomainId } = req.body;
     const domainId = req.params.id;
 
@@ -206,6 +229,13 @@ router.put(
       }
 
       if (parentDomainId) {
+    if (!isValidObjectId(parentDomainId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid parentDomainId format"
+      });
+    }
+
         const parent = await Domain.findById(parentDomainId).select("tenantId");
 
         if (!parent) {
@@ -304,6 +334,13 @@ router.delete(
   "/:id",
   verifyDomainAccess({ targetDomainParam: "id" }),
   async (req, res) => {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid domain id format"
+      });
+    }
+
     const domainId = req.params.id;
 
     logger.info("Delete domain request received", {
