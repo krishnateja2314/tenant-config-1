@@ -7,8 +7,9 @@ import authRoutes from "./routes/auth.routes.js";
 import AuthConfig from "./models/AuthConfig.js";
 import authConfigRoutes from "./routes/authConfig.routes.js";
 import centralAuthRoutes from "./routes/centralAuth.routes.js";
-import domainRoutes from "./routes/domains.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
+import domainRoutes from "./routes/domain.routes.js";
+import mailingListRoutes from "./routes/mailingList.routes.js";
 import externalRoutes from "./routes/external.routes.js";
 import tokenRoutes from "./routes/token.routes.js";
 import dns from "node:dns";
@@ -40,8 +41,7 @@ app.get("/", (req, res) => {
 });
 
 // MongoDB connection
-mongoose
-  .connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI);
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
