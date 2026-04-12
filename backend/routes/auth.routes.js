@@ -132,14 +132,20 @@ router.post("/signup", async (req, res) => {
   logger.info("Initiating admin signup", { email, tenantId, role });
 
   try {
-    const { name, password } = req.body;
+    const { name, password, domainId } = req.body;
     const hashed = await bcrypt.hash(password, 10);
+
+    const resolvedDomainId =
+      domainId && mongoose.Types.ObjectId.isValid(domainId)
+        ? new mongoose.Types.ObjectId(domainId)
+        : null;
 
     const admin = await Admin.create({
       name,
       email,
       passwordHash: hashed,
       tenantId: new mongoose.Types.ObjectId(tenantId),
+      domainId: resolvedDomainId,
       role: role || "DOMAIN_ADMIN",
     });
 
@@ -244,6 +250,7 @@ router.post("/verify-mfa", async (req, res) => {
         adminId: admin._id,
         domainAdminId: admin.role === "DOMAIN_ADMIN" ? admin._id : null,
         tenantId: admin.tenantId,
+        domainId: admin.domainId ?? null,
         role: admin.role,
       },
       process.env.JWT_SECRET,
@@ -270,6 +277,7 @@ router.post("/verify-mfa", async (req, res) => {
           name: admin.name,
           email: admin.email,
           tenantId: admin.tenantId,
+          domainId: admin.domainId,
           role: admin.role,
         },
       },

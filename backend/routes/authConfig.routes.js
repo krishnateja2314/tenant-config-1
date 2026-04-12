@@ -1,7 +1,62 @@
 import express from "express";
 import AuthConfig from "../models/AuthConfig.js";
+import DomainAuthConfig from "../models/DomainAuthConfig.js";
+import Domain from "../models/Domain.js";
 import mongoose from "mongoose";
+import { mapAuthConfig, resolveAuthConfigWithSource } from "../utils/authConfig.util.js";
 const router = express.Router();
+
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+const isSameTenant = (left, right) => String(left) === String(right);
+
+const toObjectId = (value) => new mongoose.Types.ObjectId(value);
+
+const buildConfigUpdateData = (tenantId, domainId, body) => ({
+  tenantId,
+  ...(domainId ? { domainId } : { domainId: null }),
+  loginMethods: {
+    emailPassword: body.passwordEnabled,
+    googleSSO: body.ssoEnabled,
+    otpLogin: body.otpEnabled,
+  },
+  passwordPolicy: {
+    minLength: body.passwordPolicy?.minLength,
+    requireUppercase: body.passwordPolicy?.requireUppercase,
+    requireNumbers: body.passwordPolicy?.requireNumbers,
+    requireSpecialChar: body.passwordPolicy?.requireSpecialChars,
+    expiryDays: body.passwordPolicy?.expiryDays,
+  },
+  mfa: {
+    enabled: body.mfaEnabled,
+    methods: body.mfaEnabled ? ["OTP"] : [],
+  },
+  sessionRules: {
+    timeoutMinutes: body.sessionTimeoutMinutes,
+    maxLoginAttempts: body.maxLoginAttempts,
+    lockoutDurationMinutes: body.lockoutDurationMinutes,
+  },
+});
+
+const resolveScopedDomainId = async ({ requestedTenant, rawDomainId }) => {
+  if (!rawDomainId) {
+    return null;
+  }
+
+  if (!isValidObjectId(rawDomainId)) {
+    throw new Error("INVALID_DOMAIN_ID");
+  }
+
+  const domain = await Domain.findOne({
+    _id: toObjectId(rawDomainId),
+    tenantId: toObjectId(requestedTenant),
+  }).select("_id tenantId");
+
+  if (!domain) {
+    throw new Error("DOMAIN_NOT_FOUND");
+  }
+
+  return domain._id;
+};
 
 // ── Lightweight Structured Logger ──────────────────────────────────────────────
 const logger = {
@@ -30,13 +85,21 @@ router.get("/:tenantId", async (req, res) => {
   const { tenantId: requestedTenant } = req.params;
   const userTenant = req.user?.tenantId;
   const userId = req.user?.id;
+  const rawDomainId = req.query.domainId ?? null;
 
   logger.info("Initiating config fetch", { requestedTenant, userId });
 
   try {
-    const tenantId = new mongoose.Types.ObjectId(requestedTenant);
+    if (!isValidObjectId(requestedTenant)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid tenantId format",
+      });
+    }
 
-    if (userTenant && userTenant !== requestedTenant) {
+    const tenantId = toObjectId(requestedTenant);
+
+    if (userTenant && !isSameTenant(userTenant, requestedTenant)) {
       logger.warn("Forbidden access attempt: Tenant mismatch", {
         requestedTenant,
         userTenant,
@@ -48,62 +111,39 @@ router.get("/:tenantId", async (req, res) => {
       });
     }
 
-    let config = await AuthConfig.findOne({ tenantId });
+    let domainId = null;
 
-    // Create default config if missing
-    if (!config) {
-      logger.info("No config found for tenant. Generating default config...", {
+    try {
+      domainId = await resolveScopedDomainId({
         requestedTenant,
+        rawDomainId,
       });
+    } catch (scopeError) {
+      if (scopeError.message === "INVALID_DOMAIN_ID") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid domainId format",
+        });
+      }
 
-      config = await AuthConfig.create({
-        tenantId,
-        loginMethods: {
-          emailPassword: true,
-          googleSSO: false,
-          otpLogin: false,
-        },
-        mfa: {
-          enabled: false,
-          methods: [],
-        },
-        passwordPolicy: {
-          minLength: 8,
-          requireUppercase: true,
-          requireNumbers: true,
-          requireSpecialChar: false,
-          expiryDays: 90,
-        },
-        sessionRules: {
-          timeoutMinutes: 60,
-          maxLoginAttempts: 5,
-          lockoutDurationMinutes: 15,
-        },
-      });
+      if (scopeError.message === "DOMAIN_NOT_FOUND") {
+        return res.status(404).json({
+          success: false,
+          message: "Domain not found for this tenant",
+        });
+      }
 
-      logger.info("Default config created and saved to database", {
-        requestedTenant,
-      });
+      throw scopeError;
     }
 
-    // Map DB config to frontend response
+    const resolved = await resolveAuthConfigWithSource(tenantId, domainId);
     const response = {
-      tenantId: config.tenantId.toString(),
-      passwordEnabled: config.loginMethods.emailPassword,
-      ssoEnabled: config.loginMethods.googleSSO,
-      otpEnabled: config.loginMethods.otpLogin,
-      mfaEnabled: config.mfa.enabled,
-      passwordPolicy: {
-        minLength: config.passwordPolicy.minLength,
-        requireUppercase: config.passwordPolicy.requireUppercase,
-        requireNumbers: config.passwordPolicy.requireNumbers,
-        requireSpecialChars: config.passwordPolicy.requireSpecialChar,
-        expiryDays: config.passwordPolicy.expiryDays,
-      },
-      allowedRoles: ["TENANT_ADMIN", "DOMAIN_ADMIN"], // mock for now
-      sessionTimeoutMinutes: config.sessionRules.timeoutMinutes,
-      maxLoginAttempts: config.sessionRules.maxLoginAttempts,
-      lockoutDurationMinutes: config.sessionRules.lockoutDurationMinutes,
+      ...mapAuthConfig(resolved.config, {
+        sourceType: resolved.sourceType,
+        sourceDomainId: resolved.sourceDomainId,
+      }),
+      requestedDomainId: domainId?.toString() ?? null,
+      allowedRoles: ["TENANT_ADMIN", "DOMAIN_ADMIN"],
     };
 
     logger.info("Config fetched successfully", { requestedTenant });
@@ -127,13 +167,21 @@ router.put("/:tenantId", async (req, res) => {
   const userTenant = req.user?.tenantId;
   const userRole = req.user?.role;
   const userId = req.user?.id;
+  const rawDomainId = req.query.domainId ?? req.body?.domainId ?? null;
 
   logger.info("Initiating config update", { requestedTenant, userId });
 
   try {
-    const tenantId = new mongoose.Types.ObjectId(requestedTenant);
+    if (!isValidObjectId(requestedTenant)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid tenantId format",
+      });
+    }
 
-    if (userTenant !== requestedTenant) {
+    const tenantId = toObjectId(requestedTenant);
+
+    if (!isSameTenant(userTenant, requestedTenant)) {
       logger.warn("Forbidden update attempt: Tenant mismatch", {
         requestedTenant,
         userTenant,
@@ -158,57 +206,52 @@ router.put("/:tenantId", async (req, res) => {
     }
 
     const body = req.body;
+    let domainId = null;
 
-    // Map frontend payload to DB shape
-    const updateData = {
-      tenantId,
-      loginMethods: {
-        emailPassword: body.passwordEnabled,
-        googleSSO: body.ssoEnabled,
-        otpLogin: body.otpEnabled,
-      },
-      passwordPolicy: {
-        minLength: body.passwordPolicy?.minLength,
-        requireUppercase: body.passwordPolicy?.requireUppercase,
-        requireNumbers: body.passwordPolicy?.requireNumbers,
-        requireSpecialChar: body.passwordPolicy?.requireSpecialChars,
-        expiryDays: body.passwordPolicy?.expiryDays,
-      },
-      mfa: {
-        enabled: body.mfaEnabled,
-        methods: body.mfaEnabled ? ["OTP"] : [],
-      },
-      sessionRules: {
-        timeoutMinutes: body.sessionTimeoutMinutes,
-        maxLoginAttempts: body.maxLoginAttempts,
-        lockoutDurationMinutes: body.lockoutDurationMinutes,
-      },
-    };
+    try {
+      domainId = await resolveScopedDomainId({
+        requestedTenant,
+        rawDomainId,
+      });
+    } catch (scopeError) {
+      if (scopeError.message === "INVALID_DOMAIN_ID") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid domainId format",
+        });
+      }
 
-    const updated = await AuthConfig.findOneAndUpdate(
-      { tenantId },
-      updateData,
-      { new: true, upsert: true },
-    );
+      if (scopeError.message === "DOMAIN_NOT_FOUND") {
+        return res.status(404).json({
+          success: false,
+          message: "Domain not found for this tenant",
+        });
+      }
 
-    // Map DB config to frontend response
+      throw scopeError;
+    }
+
+    const updateData = buildConfigUpdateData(tenantId, domainId, body);
+
+    const updated = domainId
+      ? await DomainAuthConfig.findOneAndUpdate(
+          { tenantId, domainId },
+          updateData,
+          { new: true, upsert: true, setDefaultsOnInsert: true },
+        )
+      : await AuthConfig.findOneAndUpdate(
+          { tenantId, domainId: null },
+          updateData,
+          { new: true, upsert: true, setDefaultsOnInsert: true },
+        );
+
     const response = {
-      tenantId: updated.tenantId.toString(),
-      passwordEnabled: updated.loginMethods.emailPassword,
-      ssoEnabled: updated.loginMethods.googleSSO,
-      otpEnabled: updated.loginMethods.otpLogin,
-      mfaEnabled: updated.mfa.enabled,
-      passwordPolicy: {
-        minLength: updated.passwordPolicy.minLength,
-        requireUppercase: updated.passwordPolicy.requireUppercase,
-        requireNumbers: updated.passwordPolicy.requireNumbers,
-        requireSpecialChars: updated.passwordPolicy.requireSpecialChar,
-        expiryDays: updated.passwordPolicy.expiryDays,
-      },
+      ...mapAuthConfig(updated, {
+        sourceType: domainId ? "domain" : "tenant",
+        sourceDomainId: domainId,
+      }),
+      requestedDomainId: domainId?.toString() ?? null,
       allowedRoles: ["TENANT_ADMIN"],
-      sessionTimeoutMinutes: updated.sessionRules.timeoutMinutes,
-      maxLoginAttempts: updated.sessionRules.maxLoginAttempts,
-      lockoutDurationMinutes: updated.sessionRules.lockoutDurationMinutes,
     };
 
     logger.info("Config updated successfully", { requestedTenant });

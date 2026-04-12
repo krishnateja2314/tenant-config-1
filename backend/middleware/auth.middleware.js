@@ -26,7 +26,10 @@ export const requireAuth = (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = decoded;
+    req.user = {
+      ...decoded,
+      domainId: decoded.domainId ?? null,
+    };
 
     next();
 

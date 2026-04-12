@@ -132,6 +132,7 @@ router.post("/signup", async (req, res) => {
       email,
       passwordHash,
       tenantId: tenantObjectId,
+      domainId: null,
       role: "USER",
     });
 
@@ -245,7 +246,11 @@ router.post("/login", async (req, res) => {
       }
 
       const sessionToken = jwt.sign(
-        { email: user.email, tenantId },
+        {
+          email: user.email,
+          tenantId,
+          domainId: user.domainId ?? null,
+        },
         process.env.JWT_SECRET,
         {
           expiresIn: "5m",
