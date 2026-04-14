@@ -3,9 +3,10 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/tenant-config";
+const MONGO_URI =
+  process.env.MONGO_URI || "mongodb://localhost:27017/tenant-config";
 
-const main = async () => {
+try {
   await mongoose.connect(MONGO_URI);
 
   const db = mongoose.connection.db;
@@ -19,10 +20,12 @@ const main = async () => {
       continue;
     }
 
-    const result = await db.collection(collectionName).updateMany(
-      { domainId: { $exists: false } },
-      { $set: { domainId: null } },
-    );
+    const result = await db
+      .collection(collectionName)
+      .updateMany(
+        { domainId: { $exists: false } },
+        { $set: { domainId: null } },
+      );
 
     console.log(
       `[ok] ${collectionName}: matched=${result.matchedCount}, modified=${result.modifiedCount}`,
@@ -30,9 +33,7 @@ const main = async () => {
   }
 
   await mongoose.disconnect();
-};
-
-main().catch(async (error) => {
+} catch (error) {
   console.error(error);
   try {
     await mongoose.disconnect();
@@ -40,4 +41,4 @@ main().catch(async (error) => {
     // ignore disconnect error on failure path
   }
   process.exit(1);
-});
+}

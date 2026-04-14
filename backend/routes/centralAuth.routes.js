@@ -42,7 +42,7 @@ const hasSpecialCharacter = (value) => {
   }
 
   const specialCharacters = new Set(
-    Array.from("!@#$%^&*()_+-=[]{};':\\\"\\|,.<>/?"),
+    Array.from(String.raw`!@#$%^&*()_+-=[]{};':"\|,.<>/?`),
   );
   return Array.from(value).some((char) => specialCharacters.has(char));
 };
@@ -80,6 +80,87 @@ const sendOtpToUser = async (user) => {
   await user.save();
   await sendOTPEmail(user.email, otp);
   return otp;
+};
+
+const sendOtpChallenge = async (user, tenantId, res) => {
+  await sendOtpToUser(user);
+  const sessionToken = createSessionToken(user, tenantId);
+  return res.json({
+    success: true,
+    message: "OTP has been sent to your email.",
+    data: {
+      requiresMFA: true,
+      sessionToken,
+    },
+  });
+};
+
+const applyFailedPasswordAttempt = async (user, authConfig, res) => {
+  user.failedLoginAttempts += 1;
+
+  if (
+    authConfig.sessionRules.maxLoginAttempts > 0 &&
+    user.failedLoginAttempts >= authConfig.sessionRules.maxLoginAttempts
+  ) {
+    user.lockoutUntil = new Date(
+      Date.now() + authConfig.sessionRules.lockoutDurationMinutes * 60000,
+    );
+    await user.save();
+
+    return res.json({
+      success: false,
+      message: `Account locked for ${authConfig.sessionRules.lockoutDurationMinutes} minutes after ${authConfig.sessionRules.maxLoginAttempts} failed attempt${
+        authConfig.sessionRules.maxLoginAttempts === 1 ? "" : "s"
+      }.`,
+    });
+  }
+
+  await user.save();
+  return res
+    .status(401)
+    .json({ success: false, message: "Invalid credentials" });
+};
+
+const renderMfaResponse = async (user, sessionToken, res) => {
+  if (!user?.totpSecret) {
+    const secret = speakeasy.generateSecret({
+      name: `TenantConfig (${user.email})`,
+    });
+    user.totpSecret = secret.base32;
+    await user.save();
+
+    return res.json({
+      success: true,
+      message:
+        "MFA setup is required. Scan the QR code or enter the secret in your authenticator app.",
+      data: {
+        requiresMFA: true,
+        requiresTotpSetup: true,
+        sessionToken,
+        otpauthUrl: secret.otpauth_url,
+        totpSecret: secret.base32,
+      },
+    });
+  }
+
+  const otpauthUrl = speakeasy.otpauthURL({
+    secret: user.totpSecret,
+    label: `TenantConfig (${user.email})`,
+    issuer: "TenantConfig",
+    encoding: "base32",
+  });
+
+  return res.json({
+    success: true,
+    message: "MFA is enabled. Enter your authenticator code.",
+    data: {
+      requiresMFA: true,
+      requiresTotp: true,
+      sessionToken,
+      otpauthUrl,
+      totpSecret: user.totpSecret,
+    },
+  });
 };
 
 const buildRedirectUrl = (baseUrl, params = {}) => {
@@ -303,9 +384,10 @@ router.post("/login", async (req, res) => {
     );
 
     if (!user) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid credentials" });
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
     }
 
     if (isLockedOut(user)) {
@@ -344,45 +426,14 @@ router.post("/login", async (req, res) => {
 
       const validPassword = await bcrypt.compare(password, user.passwordHash);
       if (!validPassword) {
-        user.failedLoginAttempts += 1;
-
-        if (
-          authConfig.sessionRules.maxLoginAttempts > 0 &&
-          user.failedLoginAttempts >= authConfig.sessionRules.maxLoginAttempts
-        ) {
-          user.lockoutUntil = new Date(
-            Date.now() + authConfig.sessionRules.lockoutDurationMinutes * 60000,
-          );
-          await user.save();
-
-          return res.json({
-            success: false,
-            message: `Account locked for ${authConfig.sessionRules.lockoutDurationMinutes} minutes after ${authConfig.sessionRules.maxLoginAttempts} failed attempt${
-              authConfig.sessionRules.maxLoginAttempts === 1 ? "" : "s"
-            }.`,
-          });
-        }
-
-        await user.save();
-        return res
-          .status(401)
-          .json({ success: false, message: "Invalid credentials" });
+        return applyFailedPasswordAttempt(user, authConfig, res);
       }
 
       user.failedLoginAttempts = 0;
       user.lockoutUntil = null;
 
       if (authConfig.loginMethods.otpLogin && !authConfig.mfa.enabled) {
-        await sendOtpToUser(user);
-        const sessionToken = createSessionToken(user, tenantId);
-        return res.json({
-          success: true,
-          message: "OTP has been sent to your email.",
-          data: {
-            requiresMFA: true,
-            sessionToken,
-          },
-        });
+        return sendOtpChallenge(user, tenantId, res);
       }
     } else if (!authConfig.loginMethods.otpLogin) {
       return res.status(403).json({
@@ -394,60 +445,11 @@ router.post("/login", async (req, res) => {
     const sessionToken = createSessionToken(user, tenantId);
 
     if (authConfig.mfa.enabled) {
-      if (!user?.totpSecret) {
-        const secret = speakeasy.generateSecret({
-          name: `TenantConfig (${user.email})`,
-        });
-        user.totpSecret = secret.base32;
-        await user.save();
-
-        return res.json({
-          success: true,
-          message:
-            "MFA setup is required. Scan the QR code or enter the secret in your authenticator app.",
-          data: {
-            requiresMFA: true,
-            requiresTotpSetup: true,
-            sessionToken,
-            otpauthUrl: secret.otpauth_url,
-            totpSecret: secret.base32,
-          },
-        });
-      }
-
-      const otpauthUrl = speakeasy.otpauthURL({
-        secret: user.totpSecret,
-        label: `TenantConfig (${user.email})`,
-        issuer: "TenantConfig",
-        encoding: "base32",
-      });
-
-      return res.json({
-        success: true,
-        message: "MFA is enabled. Enter your authenticator code.",
-        data: {
-          requiresMFA: true,
-          requiresTotp: true,
-          sessionToken,
-          otpauthUrl,
-          totpSecret: user.totpSecret,
-        },
-      });
+      return renderMfaResponse(user, sessionToken, res);
     }
 
-    if (
-      authConfig.loginMethods.otpLogin &&
-      !authConfig.loginMethods.emailPassword
-    ) {
-      await sendOtpToUser(user);
-      return res.json({
-        success: true,
-        message: "OTP has been sent to your email.",
-        data: {
-          requiresMFA: true,
-          sessionToken,
-        },
-      });
+    if (authConfig.loginMethods.otpLogin) {
+      return sendOtpChallenge(user, tenantId, res);
     }
 
     user.lastActivityAt = new Date();
@@ -477,6 +479,7 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -536,6 +539,7 @@ router.post("/verify-otp", async (req, res) => {
       },
     });
   } catch (err) {
+    console.error(err);
     res
       .status(401)
       .json({ success: false, message: "Invalid or expired session" });
@@ -609,6 +613,7 @@ router.post("/verify-totp", async (req, res) => {
       },
     });
   } catch (err) {
+    console.error(err);
     res
       .status(401)
       .json({ success: false, message: "Invalid or expired session" });

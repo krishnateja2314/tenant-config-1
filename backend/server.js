@@ -33,20 +33,19 @@ app.use("/api/central-auth", centralAuthRoutes);
 app.use("/api/admin", authRoutes);
 app.use("/api/external", externalRoutes);
 app.use("/api/token", tokenRoutes);
-app.use("/api/domains", requireAuth, domainRoutes);
 app.use("/api/mailing-lists", requireAuth, mailingListRoutes);
 app.get("/", (req, res) => {
   res.send("Backend running");
 });
 
 // MongoDB connection
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log("MongoDB Connected");
+try {
+  await mongoose.connect(process.env.MONGO_URI);
+  console.log("MongoDB Connected");
 
-    app.listen(3001, () => {
-      console.log("Server running on port 3001");
-    });
-  })
-  .catch((err) => console.log(err));
+  app.listen(3001, () => {
+    console.log("Server running on port 3001");
+  });
+} catch (err) {
+  console.error(err);
+}

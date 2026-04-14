@@ -111,6 +111,7 @@ router.post(
         },
       });
     } catch (err) {
+      console.error(err);
       return res.status(401).json({
         success: false,
         message: "Invalid or expired token",

@@ -33,6 +33,135 @@ const logger = {
   },
 };
 
+const apiError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
+
+const buildCreateDomainPayload = async ({
+  tenantId,
+  domainName,
+  parentDomainId,
+  user,
+  rootDomainIds,
+}) => {
+  if (!isSameTenant(user.tenantId, tenantId)) {
+    throw apiError(403, "Tenant mismatch");
+  }
+
+  if (parentDomainId) {
+    if (!isValidObjectId(parentDomainId)) {
+      throw apiError(400, "Invalid parentDomainId format");
+    }
+
+    const parent = await Domain.findById(parentDomainId).select("tenantId");
+    if (!parent) {
+      throw apiError(404, "Parent domain not found");
+    }
+
+    if (!isSameTenant(parent.tenantId, user.tenantId)) {
+      throw apiError(403, "Parent domain belongs to another tenant");
+    }
+
+    if (user.role === "DOMAIN_ADMIN") {
+      const hasParentAccess = await domainAccessService.isDomainWithinScope({
+        tenantId: user.tenantId,
+        targetDomainId: parentDomainId,
+        rootDomainIds,
+      });
+
+      if (!hasParentAccess) {
+        throw apiError(403, "Parent domain is outside your assigned scope");
+      }
+    }
+  } else if (user.role === "DOMAIN_ADMIN") {
+    throw apiError(
+      403,
+      "Domain admins can only create child domains within their assigned subtree",
+    );
+  }
+
+  return {
+    tenantId: new mongoose.Types.ObjectId(tenantId),
+    domainName: String(domainName).trim(),
+    parentDomainId: parentDomainId
+      ? new mongoose.Types.ObjectId(parentDomainId)
+      : null,
+  };
+};
+
+const buildUpdateDomainPayload = async ({
+  domainId,
+  body,
+  user,
+  rootDomainIds,
+}) => {
+  const existing = await Domain.findById(domainId).select("tenantId");
+
+  if (!existing) {
+    throw apiError(404, "Domain node not found.");
+  }
+
+  if (!isSameTenant(existing.tenantId, user.tenantId)) {
+    throw apiError(403, "Forbidden");
+  }
+
+  const parentDomainId = body.parentDomainId;
+  if (parentDomainId) {
+    if (!isValidObjectId(parentDomainId)) {
+      throw apiError(400, "Invalid parentDomainId format");
+    }
+
+    const parent = await Domain.findById(parentDomainId).select("tenantId");
+    if (!parent) {
+      throw apiError(404, "Domain node not found.");
+    }
+
+    if (!isSameTenant(parent.tenantId, user.tenantId)) {
+      throw apiError(403, "Parent domain belongs to another tenant");
+    }
+
+    if (user.role === "DOMAIN_ADMIN") {
+      const hasParentAccess = await domainAccessService.isDomainWithinScope({
+        tenantId: user.tenantId,
+        targetDomainId: parentDomainId,
+        rootDomainIds,
+      });
+
+      if (!hasParentAccess) {
+        throw apiError(403, "Parent domain is outside your assigned scope");
+      }
+    }
+  } else if (user.role === "DOMAIN_ADMIN") {
+    throw apiError(403, "Domain admins cannot move domains to the tenant root");
+  }
+
+  if (await isCycle(domainId, parentDomainId)) {
+    throw apiError(
+      409,
+      "Circular dependency detected. Cannot reparent to a child node.",
+    );
+  }
+
+  const updatePayload = {};
+  if (typeof body.domainName === "string" && body.domainName.trim()) {
+    updatePayload.domainName = body.domainName.trim();
+  }
+
+  if (body.parentDomainId !== undefined) {
+    updatePayload.parentDomainId = body.parentDomainId
+      ? new mongoose.Types.ObjectId(body.parentDomainId)
+      : null;
+  }
+
+  if (!Object.keys(updatePayload).length) {
+    throw apiError(400, "No valid fields were provided for update.");
+  }
+
+  return updatePayload;
+};
+
 // 2. CREATE DOMAIN NODE
 router.post(
   "/",
@@ -49,76 +178,13 @@ router.post(
     });
 
     try {
-      if (!isSameTenant(req.user.tenantId, tenantId)) {
-        logger.warn("Create domain blocked: tenant mismatch", {
-          userTenantId: req.user?.tenantId,
-          requestTenantId: tenantId,
-        });
-        return res.status(403).json({
-          success: false,
-          message: "Tenant mismatch",
-        });
-      }
-
-      if (req.body.parentDomainId) {
-        if (!isValidObjectId(req.body.parentDomainId)) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid parentDomainId format",
-          });
-        }
-
-        const parent = await Domain.findById(req.body.parentDomainId).select(
-          "tenantId",
-        );
-
-        if (!parent) {
-          logger.warn("Create domain blocked: parent not found", {
-            parentDomainId,
-            tenantId,
-          });
-          return res.status(404).json({
-            success: false,
-            message: "Parent domain not found",
-          });
-        }
-
-        if (!isSameTenant(parent.tenantId, req.user.tenantId)) {
-          logger.warn(
-            "Create domain blocked: parent belongs to another tenant",
-            {
-              parentDomainId,
-              parentTenantId: parent.tenantId,
-              userTenantId: req.user?.tenantId,
-            },
-          );
-          return res.status(403).json({
-            success: false,
-            message: "Parent domain belongs to another tenant",
-          });
-        }
-      } else if (req.user.role === "DOMAIN_ADMIN") {
-        logger.warn(
-          "Create domain blocked: domain admin attempted root creation",
-          {
-            userId: req.user?.adminId,
-            tenantId,
-          },
-        );
-        return res.status(403).json({
-          success: false,
-          message:
-            "Domain admins can only create child domains within their assigned subtree",
-        });
-      }
-
-      const domainPayload = {
-        tenantId: new mongoose.Types.ObjectId(tenantId),
-        domainName: String(domainName).trim(),
-        parentDomainId: req.body.parentDomainId
-          ? new mongoose.Types.ObjectId(req.body.parentDomainId)
-          : null,
-      };
+      const domainPayload = await buildCreateDomainPayload({
+        tenantId,
+        domainName,
+        parentDomainId: req.body.parentDomainId,
+        user: req.user,
+        rootDomainIds: req.domainAccess.rootDomainIds,
+      });
 
       const domain = await Domain.create(domainPayload);
 
@@ -135,7 +201,7 @@ router.post(
         parentDomainId,
         error: error.message,
       });
-      res.status(500).json({
+      res.status(error.status || 500).json({
         success: false,
         message: error.message,
       });
@@ -228,132 +294,12 @@ router.put(
     });
 
     try {
-      const existing = await Domain.findById(domainId).select("tenantId");
-
-      if (!existing) {
-        logger.warn("Update domain blocked: domain not found", { domainId });
-        return res.status(404).json({
-          success: false,
-          message: "Domain node not found.",
-        });
-      }
-
-      if (!isSameTenant(existing.tenantId, req.user.tenantId)) {
-        logger.warn("Update domain blocked: tenant mismatch", {
-          domainId,
-          domainTenantId: existing.tenantId,
-          userTenantId: req.user?.tenantId,
-        });
-        return res.status(403).json({
-          success: false,
-          message: "Forbidden",
-        });
-      }
-
-      if (parentDomainId) {
-        if (!isValidObjectId(parentDomainId)) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid parentDomainId format",
-          });
-        }
-
-        const parent = await Domain.findById(parentDomainId).select("tenantId");
-
-        if (!parent) {
-          logger.warn("Update domain blocked: new parent not found", {
-            domainId,
-            parentDomainId,
-          });
-          return res.status(404).json({
-            success: false,
-            message: "Domain node not found.",
-          });
-        }
-
-        if (!isSameTenant(parent.tenantId, req.user.tenantId)) {
-          logger.warn(
-            "Update domain blocked: parent belongs to another tenant",
-            {
-              domainId,
-              parentDomainId,
-              parentTenantId: parent.tenantId,
-              userTenantId: req.user?.tenantId,
-            },
-          );
-          return res.status(403).json({
-            success: false,
-            message: "Parent domain belongs to another tenant",
-          });
-        }
-
-        if (req.user.role === "DOMAIN_ADMIN") {
-          const hasParentAccess = await domainAccessService.isDomainWithinScope(
-            {
-              tenantId: req.user.tenantId,
-              targetDomainId: parentDomainId,
-              rootDomainIds: req.domainAccess.rootDomainIds,
-            },
-          );
-
-          if (!hasParentAccess) {
-            logger.warn("Update domain blocked: parent out of scope", {
-              domainId,
-              parentDomainId,
-              rootDomainIds: req.domainAccess.rootDomainIds,
-            });
-            return res.status(403).json({
-              success: false,
-              message: "Parent domain is outside your assigned scope",
-            });
-          }
-        }
-      } else if (req.user.role === "DOMAIN_ADMIN") {
-        logger.warn(
-          "Update domain blocked: domain admin attempted move to root",
-          {
-            domainId,
-            userId: req.user?.adminId,
-          },
-        );
-        return res.status(403).json({
-          success: false,
-          message: "Domain admins cannot move domains to the tenant root",
-        });
-      }
-
-      // Upstream traversal cycle check
-      if (await isCycle(domainId, parentDomainId)) {
-        logger.warn("Update domain blocked: cycle detected", {
-          domainId,
-          parentDomainId,
-        });
-        return res.status(409).json({
-          success: false,
-          message:
-            "Circular dependency detected. Cannot reparent to a child node.",
-        });
-      }
-
-      const updatePayload = {};
-      if (
-        typeof req.body.domainName === "string" &&
-        req.body.domainName.trim()
-      ) {
-        updatePayload.domainName = req.body.domainName.trim();
-      }
-      if (req.body.parentDomainId !== undefined) {
-        updatePayload.parentDomainId = req.body.parentDomainId
-          ? new mongoose.Types.ObjectId(req.body.parentDomainId)
-          : null;
-      }
-
-      if (!Object.keys(updatePayload).length) {
-        return res.status(400).json({
-          success: false,
-          message: "No valid fields were provided for update.",
-        });
-      }
+      const updatePayload = await buildUpdateDomainPayload({
+        domainId,
+        body: req.body,
+        user: req.user,
+        rootDomainIds: req.domainAccess.rootDomainIds,
+      });
 
       const updated = await Domain.findByIdAndUpdate(domainId, updatePayload, {
         new: true,
@@ -371,7 +317,7 @@ router.put(
         parentDomainId,
         error: error.message,
       });
-      res.status(500).json({
+      res.status(error.status || 500).json({
         success: false,
         message: error.message,
       });

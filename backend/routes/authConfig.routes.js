@@ -73,7 +73,7 @@ const hasSpecialCharacter = (value) => {
     return false;
   }
   const specialCharacters = new Set(
-    Array.from("!@#$%^&*()_+-=[]{};':\"\\|,.<>/?"),
+    Array.from(String.raw`!@#$%^&*()_+-=[]{};':"\|,.<>/?`),
   );
   return Array.from(value).some((char) => specialCharacters.has(char));
 };

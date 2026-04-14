@@ -46,7 +46,7 @@ export const createDomainAccessService = ({
       return false;
     }
 
-    const rootIdSet = new Set(rootDomainIds.map((rootId) => String(rootId)));
+    const rootIdSet = new Set(rootDomainIds.map(String));
     let currentDomainId = targetDomainId;
     const visited = new Set();
 
