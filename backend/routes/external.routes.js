@@ -1,5 +1,6 @@
 import express from "express";
 import AuthConfig from "../models/AuthConfig.js";
+import Infrastructure from "../models/Infrastructure.js";
 import User from "../models/User.js";
 import Admin from "../models/Admin.js";
 import mongoose from "mongoose";
@@ -7,6 +8,41 @@ import jwt from "jsonwebtoken";
 import { externalAuth } from "../middleware/externalAuth.middleware.js";
 
 const router = express.Router();
+
+// GET /api/external/infrastructure/:tenantId/:domainId
+// Allows downstream services (resource booking, storage modules) to query
+// the infrastructure allocation for a specific domain.
+router.get(
+  "/infrastructure/:tenantId/:domainId",
+  externalAuth("read:infrastructure"),
+  async (req, res) => {
+    try {
+      const tenantId = new mongoose.Types.ObjectId(req.params.tenantId);
+      const domainId = new mongoose.Types.ObjectId(req.params.domainId);
+
+      const infra = await Infrastructure.findOne({ tenantId, domainId });
+
+      if (!infra) {
+        return res.status(404).json({
+          success: false,
+          message: "No infrastructure allocation found for this domain",
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          allocationStatus: infra.allocationStatus,
+          storageQuota: infra.storageQuota,
+          computeLimit: infra.computeLimit,
+          specialAccessFlags: infra.specialAccessFlags,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  },
+);
 
 router.get(
   "/auth-config/:tenantId",
