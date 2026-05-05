@@ -9,17 +9,24 @@ const auditLogSchema = new mongoose.Schema(
     },
     studentId: {
       type: String,
-      required: true,
+      index: true,
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       index: true,
     },
     domainId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
       index: true,
     },
     policyId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
+    },
+    eventId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AttendanceEvent",
+      index: true,
     },
     action: {
       type: String,
@@ -28,18 +35,18 @@ const auditLogSchema = new mongoose.Schema(
     requestPath: String,
     actualAttendance: {
       type: Number,
-      required: true,
     },
     requiredThreshold: {
       type: Number,
-      required: true,
     },
     decision: {
       type: String,
       enum: ["ALLOWED", "DENIED"],
-      required: true,
     },
     reasonForDenial: String,
+    details: {
+      type: mongoose.Schema.Types.Mixed,
+    },
     timestamp: {
       type: Date,
       default: Date.now,
@@ -54,5 +61,8 @@ const auditLogSchema = new mongoose.Schema(
 // Create index for efficient audit querying
 auditLogSchema.index({ tenantId: 1, timestamp: -1 });
 auditLogSchema.index({ studentId: 1, timestamp: -1 });
+auditLogSchema.index({ userId: 1, timestamp: -1 });
+auditLogSchema.index({ eventId: 1, timestamp: -1 });
+auditLogSchema.index({ tenantId: 1, userId: 1, eventId: 1, timestamp: -1 });
 
 export default mongoose.model("AuditLog", auditLogSchema);

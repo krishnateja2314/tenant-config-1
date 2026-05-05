@@ -14,6 +14,8 @@ import tokenRoutes from "./routes/token.routes.js";
 import academicPolicyRoutes from "./routes/academicPolicy.routes.js";
 import auditLogRoutes from "./routes/auditLog.routes.js";
 import infrastructureRoutes from "./routes/infrastructure.routes.js";
+import attendanceRoutes from "./routes/attendance.routes.js";
+import markAttendanceRoutes from "./routes/markAttendance.routes.js";
 import { shouldEnforcePolicy } from "./middleware/attendanceEnforcer.middleware.js";
 import { shouldEnforceInfrastructure } from "./middleware/infrastructureEnforcer.middleware.js";
 import dns from "node:dns";
@@ -42,6 +44,8 @@ app.use("/api/token", tokenRoutes);
 app.use("/api/mailing-lists", requireAuth, mailingListRoutes);
 app.use("/api/academic-policies", requireAuth, academicPolicyRoutes);
 app.use("/api/audit-logs", requireAuth, auditLogRoutes);
+app.use("/api/attendance-events", requireAuth, attendanceRoutes);
+app.use("/api/mark-attendance", markAttendanceRoutes);
 app.use("/api/infrastructure", requireAuth, infrastructureRoutes);
 app.get("/", (req, res) => {
   res.send("Backend running");

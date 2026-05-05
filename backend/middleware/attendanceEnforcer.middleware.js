@@ -11,15 +11,16 @@ const logger = createLogger("AttendanceEnforcer");
  */
 export const attendanceEnforcer = async (req, res, next) => {
   try {
-    // Extract user context
-    const { studentId, domainId, tenantId } = req.user;
+    // Extract user context (JWT contains userId, fallback to studentId if present)
+    const userId = req.user.userId || req.user.studentId;
+    const { domainId, tenantId } = req.user;
     const targetAction = req.path;
     const ipAddress = req.ip || req.connection.remoteAddress;
     const userAgent = req.get("user-agent");
 
-    if (!studentId || !domainId || !tenantId) {
+    if (!userId || !domainId || !tenantId) {
       logger.warn("Missing required user context", {
-        hasStudentId: !!studentId,
+        hasUserId: !!userId,
         hasDomainId: !!domainId,
         hasTenantId: !!tenantId,
       });
@@ -56,7 +57,7 @@ export const attendanceEnforcer = async (req, res, next) => {
 
     if (actualAttendance === null || isNaN(actualAttendance)) {
       logger.warn("Attendance data missing or invalid", {
-        studentId,
+        userId,
         header: actualAttendanceHeader,
       });
       return res.status(400).json({
@@ -72,7 +73,7 @@ export const attendanceEnforcer = async (req, res, next) => {
     // Step 4: Log the decision asynchronously (non-blocking)
     logAuditDecision({
       tenantId,
-      studentId,
+      userId,
       domainId,
       policyId: policy._id,
       action: targetAction,
@@ -88,14 +89,14 @@ export const attendanceEnforcer = async (req, res, next) => {
     }).catch((err) => {
       logger.error("Failed to log audit decision", {
         error: err.message,
-        studentId,
+        userId,
       });
     });
 
     // Step 5: Decision logic
     if (!meetsThreshold) {
       logger.warn("Policy violation detected", {
-        studentId,
+        userId,
         domainId: domainId.toString(),
         attendance: actualAttendance,
         threshold: policy.threshold,
@@ -119,7 +120,7 @@ export const attendanceEnforcer = async (req, res, next) => {
     };
 
     logger.info("Policy check passed", {
-      studentId,
+      userId,
       attendance: actualAttendance,
       threshold: policy.threshold,
     });

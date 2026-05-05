@@ -56,6 +56,7 @@ router.get("/:tenantId", async (req, res) => {
     // Fetch logs with pagination
     const logs = await AuditLog.find(query)
       .sort({ timestamp: -1 })
+      .populate("userId", "name email")
       .limit(parseInt(limit))
       .skip(parseInt(skip));
 
@@ -121,6 +122,7 @@ router.get("/:tenantId/student/:studentId", async (req, res) => {
       studentId: String(studentId),
     })
       .sort({ timestamp: -1 })
+      .populate("userId", "name email")
       .limit(parseInt(limit))
       .skip(parseInt(skip));
 
@@ -196,6 +198,7 @@ router.get("/:tenantId/domain/:domainId", async (req, res) => {
 
     const logs = await AuditLog.find(query)
       .sort({ timestamp: -1 })
+      .populate("userId", "name email")
       .limit(parseInt(limit))
       .skip(parseInt(skip));
 
@@ -251,7 +254,7 @@ router.get("/:tenantId/stats/summary", async (req, res) => {
     }
 
     const stats = await AuditLog.aggregate([
-      { $match: { tenantId: mongoose.Types.ObjectId(tenantId) } },
+      { $match: { tenantId: new mongoose.Types.ObjectId(tenantId) } },
       {
         $group: {
           _id: "$decision",

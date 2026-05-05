@@ -187,6 +187,15 @@ const lockoutRemainingMinutes = (entity) => {
   return Math.ceil((entity.lockoutUntil.getTime() - Date.now()) / 60000);
 };
 
+const setUserCookie = (res, token, maxAgeMinutes) => {
+  res.cookie("user_token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: maxAgeMinutes * 60 * 1000,
+  });
+};
+
 router.get("/config", async (req, res) => {
   try {
     const { tenantId, domainId } = req.query;
@@ -469,6 +478,8 @@ router.post("/login", async (req, res) => {
       },
     );
 
+    setUserCookie(res, token, authConfig.sessionRules.timeoutMinutes);
+
     return res.json({
       success: true,
       message: `Authentication successful. Session expires after ${authConfig.sessionRules.timeoutMinutes} minute${
@@ -528,6 +539,8 @@ router.post("/verify-otp", async (req, res) => {
     user.otpExpiry = null;
     user.lastActivityAt = new Date();
     await user.save();
+
+    setUserCookie(res, authToken, authConfig.sessionRules.timeoutMinutes);
 
     res.json({
       success: true,
@@ -602,6 +615,8 @@ router.post("/verify-totp", async (req, res) => {
 
     user.lastActivityAt = new Date();
     await user.save();
+
+    setUserCookie(res, authToken, authConfig.sessionRules.timeoutMinutes);
 
     res.json({
       success: true,
@@ -765,6 +780,8 @@ router.get("/oauth/google/callback", async (req, res) => {
         expiresIn: `${authConfig.sessionRules.timeoutMinutes}m`,
       },
     );
+
+    setUserCookie(res, token, authConfig.sessionRules.timeoutMinutes);
 
     const redirect = buildRedirectUrl(
       callbackUrl || `/tenantconfig/auth/${tenantId}`,
