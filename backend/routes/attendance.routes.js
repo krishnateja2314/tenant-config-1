@@ -18,6 +18,7 @@ const logger = createLogger("AttendanceRoutes");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const isSameTenant = (left, right) => String(left) === String(right);
+const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 
 const WEEKDAY_MAP = {
   MONDAY: 1,
@@ -163,18 +164,20 @@ router.post("/:tenantId/create-event", async (req, res) => {
       const dayIndexes = recurrenceDays.map((day) => WEEKDAY_MAP[day]);
       const sessions = [];
 
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        if (dayIndexes.includes(getISOWeekday(d))) {
+      let currentDate = new Date(start);
+      while (currentDate <= end) {
+        if (dayIndexes.includes(getISOWeekday(currentDate))) {
           const session = buildSession({
             eventId: event._id,
             tenantId,
             domainId: domainId || null,
-            date: new Date(d),
+            date: new Date(currentDate),
             startTime,
             endTime,
           });
           sessions.push(session);
         }
+        currentDate = new Date(currentDate.getTime() + 24 * 60 * 60 * 1000);
       }
 
       if (sessions.length > 0) {
@@ -259,8 +262,8 @@ router.get("/:tenantId/events/:eventId", async (req, res) => {
     }
 
     const event = await AttendanceEvent.findOne({
-      _id: eventId,
-      tenantId,
+      _id: toObjectId(eventId),
+      tenantId: toObjectId(tenantId),
     });
 
     if (!event) {
@@ -271,8 +274,8 @@ router.get("/:tenantId/events/:eventId", async (req, res) => {
     }
 
     const sessions = await AttendanceSession.find({
-      eventId,
-      tenantId,
+      eventId: toObjectId(eventId),
+      tenantId: toObjectId(tenantId),
     }).sort({ sessionDate: 1 });
 
     const attendanceCount = await AttendanceRecord.aggregate([
@@ -334,8 +337,8 @@ router.delete("/:tenantId/events/:eventId", async (req, res) => {
     }
 
     const event = await AttendanceEvent.findOneAndDelete({
-      _id: eventId,
-      tenantId,
+      _id: toObjectId(eventId),
+      tenantId: toObjectId(tenantId),
     });
 
     if (!event) {
@@ -345,8 +348,8 @@ router.delete("/:tenantId/events/:eventId", async (req, res) => {
       });
     }
 
-    await AttendanceSession.deleteMany({ eventId });
-    await AttendanceRecord.deleteMany({ eventId });
+    await AttendanceSession.deleteMany({ eventId: toObjectId(eventId) });
+    await AttendanceRecord.deleteMany({ eventId: toObjectId(eventId) });
 
     logger.info("Event deleted successfully", {
       eventId,
@@ -392,8 +395,8 @@ router.get("/:tenantId/check-window/:eventId", async (req, res) => {
 
     const now = new Date();
     const session = await AttendanceSession.findOne({
-      eventId,
-      tenantId,
+      eventId: toObjectId(eventId),
+      tenantId: toObjectId(tenantId),
       sessionDate: {
         $gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
         $lt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
@@ -470,8 +473,8 @@ router.post("/:tenantId/upload-csv", async (req, res) => {
     }
 
     const event = await AttendanceEvent.findOne({
-      _id: eventId,
-      tenantId,
+      _id: toObjectId(eventId),
+      tenantId: toObjectId(tenantId),
     });
 
     if (!event) {
@@ -532,21 +535,33 @@ router.get("/:tenantId/events/:eventId/records", async (req, res) => {
 
   try {
     if (!isValidObjectId(tenantId) || !isValidObjectId(eventId)) {
-      return res.status(400).json({ success: false, message: "Invalid tenantId or eventId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid tenantId or eventId" });
     }
 
     if (userTenant && !isSameTenant(userTenant, tenantId)) {
-      return res.status(403).json({ success: false, message: "Tenant mismatch" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Tenant mismatch" });
     }
 
-    const records = await AttendanceRecord.find({ eventId, tenantId })
+    const records = await AttendanceRecord.find({
+      eventId: toObjectId(eventId),
+      tenantId: toObjectId(tenantId),
+    })
       .populate("userId", "name email")
       .sort({ markedAt: -1 });
 
     res.json({ success: true, data: records });
   } catch (error) {
-    logger.error("Fetch event records failed", { eventId, error: error.message });
-    res.status(500).json({ success: false, message: "Failed to fetch records" });
+    logger.error("Fetch event records failed", {
+      eventId,
+      error: error.message,
+    });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch records" });
   }
 });
 
@@ -557,36 +572,49 @@ router.post("/:tenantId/events/:eventId/override", async (req, res) => {
 
   try {
     if (!isValidObjectId(tenantId) || !isValidObjectId(eventId)) {
-      return res.status(400).json({ success: false, message: "Invalid tenantId or eventId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid tenantId or eventId" });
     }
 
     if (userTenant && !isSameTenant(userTenant, tenantId)) {
-      return res.status(403).json({ success: false, message: "Tenant mismatch" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Tenant mismatch" });
     }
 
     if (!userEmail || !["MARK", "UNMARK"].includes(action)) {
-      return res.status(400).json({ success: false, message: "userEmail and valid action required" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "userEmail and valid action required",
+        });
     }
 
     // Since we need to look up the user by email, we must import User model inside the route or globally
     const { default: User } = await import("../models/User.js");
     const { default: AuditLog } = await import("../models/AuditLog.js");
-    
+
     const user = await User.findOne({ email: userEmail, tenantId });
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found with this email" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found with this email" });
     }
 
     const event = await AttendanceEvent.findById(eventId);
     if (!event) {
-      return res.status(404).json({ success: false, message: "Event not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Event not found" });
     }
 
     // Get today's session or the only session
     const now = new Date();
     const session = await AttendanceSession.findOne({
-      eventId,
-      tenantId,
+      eventId: toObjectId(eventId),
+      tenantId: toObjectId(tenantId),
       sessionDate: {
         $gte: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
         $lte: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
@@ -594,16 +622,21 @@ router.post("/:tenantId/events/:eventId/override", async (req, res) => {
     });
 
     if (!session) {
-      return res.status(404).json({ success: false, message: "No active session found for this event today to override" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: "No active session found for this event today to override",
+        });
     }
 
     if (action === "UNMARK") {
       await AttendanceRecord.findOneAndDelete({
         eventId,
         sessionId: session._id,
-        userId: user._id
+        userId: user._id,
       });
-      
+
       await AuditLog.create({
         tenantId,
         domainId: event.domainId,
@@ -611,10 +644,13 @@ router.post("/:tenantId/events/:eventId/override", async (req, res) => {
         eventId,
         action: "ATTENDANCE_OVERRIDE",
         details: { action: "UNMARK", byAdmin: req.user?.adminId },
-        timestamp: new Date()
+        timestamp: new Date(),
       });
-      
-      return res.json({ success: true, message: "Attendance revoked successfully" });
+
+      return res.json({
+        success: true,
+        message: "Attendance revoked successfully",
+      });
     } else {
       const record = await AttendanceRecord.findOneAndUpdate(
         { eventId, sessionId: session._id, userId: user._id },
@@ -626,11 +662,11 @@ router.post("/:tenantId/events/:eventId/override", async (req, res) => {
           userId: user._id,
           status: "PRESENT",
           markedAt: new Date(),
-          source: "ADMIN_OVERRIDE"
+          source: "ADMIN_OVERRIDE",
         },
-        { upsert: true, new: true }
+        { upsert: true, new: true },
       );
-      
+
       await AuditLog.create({
         tenantId,
         domainId: event.domainId,
@@ -638,15 +674,22 @@ router.post("/:tenantId/events/:eventId/override", async (req, res) => {
         eventId,
         action: "ATTENDANCE_OVERRIDE",
         details: { action: "MARK", byAdmin: req.user?.adminId },
-        timestamp: new Date()
+        timestamp: new Date(),
       });
 
-      return res.json({ success: true, message: "Attendance marked successfully" });
+      return res.json({
+        success: true,
+        message: "Attendance marked successfully",
+      });
     }
-
   } catch (error) {
-    logger.error("Override attendance failed", { eventId, error: error.message });
-    res.status(500).json({ success: false, message: "Failed to override attendance" });
+    logger.error("Override attendance failed", {
+      eventId,
+      error: error.message,
+    });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to override attendance" });
   }
 });
 

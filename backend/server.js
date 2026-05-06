@@ -19,7 +19,14 @@ import markAttendanceRoutes from "./routes/markAttendance.routes.js";
 import { shouldEnforcePolicy } from "./middleware/attendanceEnforcer.middleware.js";
 import { shouldEnforceInfrastructure } from "./middleware/infrastructureEnforcer.middleware.js";
 import dns from "node:dns";
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
+const dnsServers = process.env.DNS_SERVERS
+  ? process.env.DNS_SERVERS.split(",")
+      .map((server) => server.trim())
+      .filter(Boolean)
+  : [];
+if (dnsServers.length) {
+  dns.setServers(dnsServers);
+}
 dotenv.config();
 const app = express();
 app.disable("x-powered-by");

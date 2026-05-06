@@ -8,6 +8,7 @@ const logger = createLogger("AuditLog");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const isSameTenant = (left, right) => String(left) === String(right);
+const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 
 // ── GET AUDIT LOGS FOR TENANT ──────────────────────────────────────────────────
 router.get("/:tenantId", async (req, res) => {
@@ -42,23 +43,33 @@ router.get("/:tenantId", async (req, res) => {
       });
     }
 
-    // Build query
-    const query = { tenantId };
+    const tenantObjectId = toObjectId(tenantId);
+    const query = { tenantId: tenantObjectId };
 
-    if (studentId) {
-      query.studentId = String(studentId);
+    if (typeof studentId === "string" && studentId.trim()) {
+      query.studentId = studentId.trim();
     }
 
-    if (decision && ["ALLOWED", "DENIED"].includes(decision)) {
+    if (
+      typeof decision === "string" &&
+      ["ALLOWED", "DENIED"].includes(decision)
+    ) {
       query.decision = decision;
     }
+
+    const limitValue = Number.parseInt(String(limit), 10);
+    const skipValue = Number.parseInt(String(skip), 10);
+    const sanitizedLimit = Number.isNaN(limitValue)
+      ? 50
+      : Math.max(1, Math.min(limitValue, 500));
+    const sanitizedSkip = Number.isNaN(skipValue) ? 0 : Math.max(0, skipValue);
 
     // Fetch logs with pagination
     const logs = await AuditLog.find(query)
       .sort({ timestamp: -1 })
       .populate("userId", "name email")
-      .limit(parseInt(limit))
-      .skip(parseInt(skip));
+      .limit(sanitizedLimit)
+      .skip(sanitizedSkip);
 
     const total = await AuditLog.countDocuments(query);
 
@@ -67,9 +78,9 @@ router.get("/:tenantId", async (req, res) => {
       data: logs,
       pagination: {
         total,
-        limit: parseInt(limit),
-        skip: parseInt(skip),
-        hasMore: parseInt(skip) + parseInt(limit) < total,
+        limit: sanitizedLimit,
+        skip: sanitizedSkip,
+        hasMore: sanitizedSkip + sanitizedLimit < total,
       },
     });
   } catch (error) {
@@ -117,19 +128,25 @@ router.get("/:tenantId/student/:studentId", async (req, res) => {
       });
     }
 
-    const logs = await AuditLog.find({
-      tenantId,
+    const studentQuery = {
+      tenantId: toObjectId(tenantId),
       studentId: String(studentId),
-    })
+    };
+
+    const limitValue = Number.parseInt(String(limit), 10);
+    const skipValue = Number.parseInt(String(skip), 10);
+    const sanitizedLimit = Number.isNaN(limitValue)
+      ? 50
+      : Math.max(1, Math.min(limitValue, 500));
+    const sanitizedSkip = Number.isNaN(skipValue) ? 0 : Math.max(0, skipValue);
+
+    const logs = await AuditLog.find(studentQuery)
       .sort({ timestamp: -1 })
       .populate("userId", "name email")
-      .limit(parseInt(limit))
-      .skip(parseInt(skip));
+      .limit(sanitizedLimit)
+      .skip(sanitizedSkip);
 
-    const total = await AuditLog.countDocuments({
-      tenantId,
-      studentId: String(studentId),
-    });
+    const total = await AuditLog.countDocuments(studentQuery);
 
     res.json({
       success: true,
@@ -188,19 +205,29 @@ router.get("/:tenantId/domain/:domainId", async (req, res) => {
     }
 
     const query = {
-      tenantId,
-      domainId,
+      tenantId: toObjectId(tenantId),
+      domainId: toObjectId(domainId),
     };
 
-    if (decision && ["ALLOWED", "DENIED"].includes(decision)) {
+    if (
+      typeof decision === "string" &&
+      ["ALLOWED", "DENIED"].includes(decision)
+    ) {
       query.decision = decision;
     }
+
+    const limitValue = Number.parseInt(String(limit), 10);
+    const skipValue = Number.parseInt(String(skip), 10);
+    const sanitizedLimit = Number.isNaN(limitValue)
+      ? 50
+      : Math.max(1, Math.min(limitValue, 500));
+    const sanitizedSkip = Number.isNaN(skipValue) ? 0 : Math.max(0, skipValue);
 
     const logs = await AuditLog.find(query)
       .sort({ timestamp: -1 })
       .populate("userId", "name email")
-      .limit(parseInt(limit))
-      .skip(parseInt(skip));
+      .limit(sanitizedLimit)
+      .skip(sanitizedSkip);
 
     const total = await AuditLog.countDocuments(query);
 

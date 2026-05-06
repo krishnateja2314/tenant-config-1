@@ -89,8 +89,8 @@ router.get("/:tenantId/resolve/:domainId", async (req, res) => {
 
     // Verify domain belongs to tenant
     const domain = await Domain.findOne({
-      _id: domainId,
-      tenantId,
+      _id: toObjectId(domainId),
+      tenantId: toObjectId(tenantId),
     }).select("_id domainName");
 
     if (!domain) {
@@ -185,8 +185,8 @@ router.post("/:tenantId", async (req, res) => {
       }
 
       const domain = await Domain.findOne({
-        _id: domainId,
-        tenantId,
+        _id: toObjectId(domainId),
+        tenantId: toObjectId(tenantId),
       }).select("_id");
 
       if (!domain) {
