@@ -1,8 +1,10 @@
+import mongoose from "mongoose";
 import AcademicPolicy from "../models/AcademicPolicy.js";
 import Domain from "../models/Domain.js";
 import { createLogger } from "./logger.util.js";
 
 const logger = createLogger("PolicyResolution");
+const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 
 /**
  * Recursive policy inheritance algorithm
@@ -32,8 +34,8 @@ export const resolveEffectivePolicy = async (
 
   while (currentDomainId) {
     const policy = await AcademicPolicy.findOne({
-      tenantId,
-      domainId: currentDomainId,
+      tenantId: toObjectId(tenantId),
+      domainId: toObjectId(currentDomainId),
       policyType: "ATTENDANCE",
     });
 
@@ -47,8 +49,8 @@ export const resolveEffectivePolicy = async (
 
     // Move to parent domain
     const currentDomain = await Domain.findOne({
-      _id: currentDomainId,
-      tenantId,
+      _id: toObjectId(currentDomainId),
+      tenantId: toObjectId(tenantId),
     }).select("parentDomainId");
 
     if (!currentDomain?.parentDomainId) {
@@ -60,7 +62,7 @@ export const resolveEffectivePolicy = async (
 
   // Step 2: Fall back to tenant-level policy
   const tenantPolicy = await AcademicPolicy.findOne({
-    tenantId,
+    tenantId: toObjectId(tenantId),
     domainId: null,
     policyType: "ATTENDANCE",
   });
@@ -95,7 +97,7 @@ export const resolveEffectivePolicy = async (
  * Get all policies for a tenant with their domain mappings
  */
 export const getTenantPolicies = async (tenantId) => {
-  return AcademicPolicy.find({ tenantId }).populate(
+  return AcademicPolicy.find({ tenantId: toObjectId(tenantId) }).populate(
     "domainId",
     "domainName parentDomainId",
   );
@@ -106,8 +108,8 @@ export const getTenantPolicies = async (tenantId) => {
  */
 export const getDomainPolicy = async (tenantId, domainId) => {
   return AcademicPolicy.findOne({
-    tenantId,
-    domainId,
+    tenantId: toObjectId(tenantId),
+    domainId: toObjectId(domainId),
     policyType: "ATTENDANCE",
   });
 };
@@ -116,10 +118,12 @@ export const getDomainPolicy = async (tenantId, domainId) => {
  * Create or update a policy
  */
 export const upsertPolicy = async (tenantId, domainId, policyData) => {
-  const existingPolicy = await AcademicPolicy.findOne({
-    tenantId,
-    domainId: domainId || null,
-  });
+  const policyQuery = {
+    tenantId: toObjectId(tenantId),
+    domainId: domainId ? toObjectId(domainId) : null,
+  };
+
+  const existingPolicy = await AcademicPolicy.findOne(policyQuery);
 
   if (existingPolicy) {
     Object.assign(existingPolicy, {
@@ -130,8 +134,8 @@ export const upsertPolicy = async (tenantId, domainId, policyData) => {
   }
 
   return AcademicPolicy.create({
-    tenantId,
-    domainId: domainId || null,
+    tenantId: toObjectId(tenantId),
+    domainId: domainId ? toObjectId(domainId) : null,
     ...policyData,
     metadata: {
       updatedAt: new Date(),

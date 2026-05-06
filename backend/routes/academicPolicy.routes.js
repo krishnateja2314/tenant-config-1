@@ -16,6 +16,7 @@ const logger = createLogger("AcademicPolicies");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const isSameTenant = (left, right) => String(left) === String(right);
+const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 
 // ── GET ALL POLICIES FOR TENANT ────────────────────────────────────────────────
 router.get("/:tenantId", async (req, res) => {

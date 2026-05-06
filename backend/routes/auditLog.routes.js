@@ -10,6 +10,32 @@ const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const isSameTenant = (left, right) => String(left) === String(right);
 const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 
+const getPagination = (limit, skip) => {
+  const limitValue = Number.parseInt(String(limit), 10);
+  const skipValue = Number.parseInt(String(skip), 10);
+  return {
+    limit: Number.isNaN(limitValue)
+      ? 50
+      : Math.max(1, Math.min(limitValue, 500)),
+    skip: Number.isNaN(skipValue) ? 0 : Math.max(0, skipValue),
+  };
+};
+
+const buildAuditLogQuery = ({ tenantId, domainId, studentId, decision }) => {
+  const query = { tenantId: toObjectId(tenantId) };
+  if (domainId) query.domainId = toObjectId(domainId);
+  if (typeof studentId === "string" && studentId.trim()) {
+    query.studentId = studentId.trim();
+  }
+  if (
+    typeof decision === "string" &&
+    ["ALLOWED", "DENIED"].includes(decision)
+  ) {
+    query.decision = decision;
+  }
+  return query;
+};
+
 // ── GET AUDIT LOGS FOR TENANT ──────────────────────────────────────────────────
 router.get("/:tenantId", async (req, res) => {
   const { tenantId } = req.params;
@@ -43,28 +69,16 @@ router.get("/:tenantId", async (req, res) => {
       });
     }
 
-    const tenantObjectId = toObjectId(tenantId);
-    const query = { tenantId: tenantObjectId };
+    const query = buildAuditLogQuery({
+      tenantId,
+      studentId,
+      decision,
+    });
+    const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
+      limit,
+      skip,
+    );
 
-    if (typeof studentId === "string" && studentId.trim()) {
-      query.studentId = studentId.trim();
-    }
-
-    if (
-      typeof decision === "string" &&
-      ["ALLOWED", "DENIED"].includes(decision)
-    ) {
-      query.decision = decision;
-    }
-
-    const limitValue = Number.parseInt(String(limit), 10);
-    const skipValue = Number.parseInt(String(skip), 10);
-    const sanitizedLimit = Number.isNaN(limitValue)
-      ? 50
-      : Math.max(1, Math.min(limitValue, 500));
-    const sanitizedSkip = Number.isNaN(skipValue) ? 0 : Math.max(0, skipValue);
-
-    // Fetch logs with pagination
     const logs = await AuditLog.find(query)
       .sort({ timestamp: -1 })
       .populate("userId", "name email")
@@ -128,33 +142,30 @@ router.get("/:tenantId/student/:studentId", async (req, res) => {
       });
     }
 
-    const studentQuery = {
-      tenantId: toObjectId(tenantId),
-      studentId: String(studentId),
-    };
+    const query = buildAuditLogQuery({
+      tenantId,
+      studentId,
+    });
+    const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
+      limit,
+      skip,
+    );
 
-    const limitValue = Number.parseInt(String(limit), 10);
-    const skipValue = Number.parseInt(String(skip), 10);
-    const sanitizedLimit = Number.isNaN(limitValue)
-      ? 50
-      : Math.max(1, Math.min(limitValue, 500));
-    const sanitizedSkip = Number.isNaN(skipValue) ? 0 : Math.max(0, skipValue);
-
-    const logs = await AuditLog.find(studentQuery)
+    const logs = await AuditLog.find(query)
       .sort({ timestamp: -1 })
       .populate("userId", "name email")
       .limit(sanitizedLimit)
       .skip(sanitizedSkip);
 
-    const total = await AuditLog.countDocuments(studentQuery);
+    const total = await AuditLog.countDocuments(query);
 
     res.json({
       success: true,
       data: logs,
       pagination: {
         total,
-        limit: parseInt(limit),
-        skip: parseInt(skip),
+        limit: sanitizedLimit,
+        skip: sanitizedSkip,
       },
     });
   } catch (error) {
@@ -204,24 +215,15 @@ router.get("/:tenantId/domain/:domainId", async (req, res) => {
       });
     }
 
-    const query = {
-      tenantId: toObjectId(tenantId),
-      domainId: toObjectId(domainId),
-    };
-
-    if (
-      typeof decision === "string" &&
-      ["ALLOWED", "DENIED"].includes(decision)
-    ) {
-      query.decision = decision;
-    }
-
-    const limitValue = Number.parseInt(String(limit), 10);
-    const skipValue = Number.parseInt(String(skip), 10);
-    const sanitizedLimit = Number.isNaN(limitValue)
-      ? 50
-      : Math.max(1, Math.min(limitValue, 500));
-    const sanitizedSkip = Number.isNaN(skipValue) ? 0 : Math.max(0, skipValue);
+    const query = buildAuditLogQuery({
+      tenantId,
+      domainId,
+      decision,
+    });
+    const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
+      limit,
+      skip,
+    );
 
     const logs = await AuditLog.find(query)
       .sort({ timestamp: -1 })
@@ -236,8 +238,8 @@ router.get("/:tenantId/domain/:domainId", async (req, res) => {
       data: logs,
       pagination: {
         total,
-        limit: parseInt(limit),
-        skip: parseInt(skip),
+        limit: sanitizedLimit,
+        skip: sanitizedSkip,
       },
     });
   } catch (error) {
@@ -280,8 +282,9 @@ router.get("/:tenantId/stats/summary", async (req, res) => {
       });
     }
 
+    const tenantObjectId = toObjectId(tenantId);
     const stats = await AuditLog.aggregate([
-      { $match: { tenantId: new mongoose.Types.ObjectId(tenantId) } },
+      { $match: { tenantId: tenantObjectId } },
       {
         $group: {
           _id: "$decision",
@@ -290,7 +293,9 @@ router.get("/:tenantId/stats/summary", async (req, res) => {
       },
     ]);
 
-    const totalRequests = await AuditLog.countDocuments({ tenantId });
+    const totalRequests = await AuditLog.countDocuments({
+      tenantId: tenantObjectId,
+    });
 
     const allowed = stats.find((s) => s._id === "ALLOWED")?.count || 0;
     const denied = stats.find((s) => s._id === "DENIED")?.count || 0;
