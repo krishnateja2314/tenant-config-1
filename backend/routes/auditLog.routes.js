@@ -21,19 +21,53 @@ const getPagination = (limit, skip) => {
   };
 };
 
+const sanitizeStudentId = (studentId) =>
+  typeof studentId === "string" && studentId.trim()
+    ? studentId.trim()
+    : undefined;
+
+const sanitizeDecision = (decision) =>
+  typeof decision === "string" && ["ALLOWED", "DENIED"].includes(decision)
+    ? decision
+    : undefined;
+
 const buildAuditLogQuery = ({ tenantId, domainId, studentId, decision }) => {
   const query = { tenantId: toObjectId(tenantId) };
   if (domainId) query.domainId = toObjectId(domainId);
-  if (typeof studentId === "string" && studentId.trim()) {
-    query.studentId = studentId.trim();
-  }
-  if (
-    typeof decision === "string" &&
-    ["ALLOWED", "DENIED"].includes(decision)
-  ) {
-    query.decision = decision;
-  }
+  const cleanStudentId = sanitizeStudentId(studentId);
+  if (cleanStudentId) query.studentId = cleanStudentId;
+  const cleanDecision = sanitizeDecision(decision);
+  if (cleanDecision) query.decision = cleanDecision;
   return query;
+};
+
+const fetchAuditLogs = async ({
+  tenantId,
+  domainId,
+  studentId,
+  decision,
+  limit,
+  skip,
+}) => {
+  const query = buildAuditLogQuery({
+    tenantId,
+    domainId,
+    studentId,
+    decision,
+  });
+  const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
+    limit,
+    skip,
+  );
+
+  const logs = await AuditLog.find(query)
+    .sort({ timestamp: -1 })
+    .populate("userId", "name email")
+    .limit(sanitizedLimit)
+    .skip(sanitizedSkip);
+
+  const total = await AuditLog.countDocuments(query);
+  return { logs, total, sanitizedLimit, sanitizedSkip };
 };
 
 // ── GET AUDIT LOGS FOR TENANT ──────────────────────────────────────────────────
@@ -69,23 +103,15 @@ router.get("/:tenantId", async (req, res) => {
       });
     }
 
-    const query = buildAuditLogQuery({
-      tenantId,
-      studentId,
-      decision,
-    });
-    const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
-      limit,
-      skip,
+    const { logs, total, sanitizedLimit, sanitizedSkip } = await fetchAuditLogs(
+      {
+        tenantId,
+        studentId,
+        decision,
+        limit,
+        skip,
+      },
     );
-
-    const logs = await AuditLog.find(query)
-      .sort({ timestamp: -1 })
-      .populate("userId", "name email")
-      .limit(sanitizedLimit)
-      .skip(sanitizedSkip);
-
-    const total = await AuditLog.countDocuments(query);
 
     res.json({
       success: true,
@@ -142,22 +168,14 @@ router.get("/:tenantId/student/:studentId", async (req, res) => {
       });
     }
 
-    const query = buildAuditLogQuery({
-      tenantId,
-      studentId,
-    });
-    const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
-      limit,
-      skip,
+    const { logs, total, sanitizedLimit, sanitizedSkip } = await fetchAuditLogs(
+      {
+        tenantId,
+        studentId,
+        limit,
+        skip,
+      },
     );
-
-    const logs = await AuditLog.find(query)
-      .sort({ timestamp: -1 })
-      .populate("userId", "name email")
-      .limit(sanitizedLimit)
-      .skip(sanitizedSkip);
-
-    const total = await AuditLog.countDocuments(query);
 
     res.json({
       success: true,
@@ -215,23 +233,15 @@ router.get("/:tenantId/domain/:domainId", async (req, res) => {
       });
     }
 
-    const query = buildAuditLogQuery({
-      tenantId,
-      domainId,
-      decision,
-    });
-    const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
-      limit,
-      skip,
+    const { logs, total, sanitizedLimit, sanitizedSkip } = await fetchAuditLogs(
+      {
+        tenantId,
+        domainId,
+        decision,
+        limit,
+        skip,
+      },
     );
-
-    const logs = await AuditLog.find(query)
-      .sort({ timestamp: -1 })
-      .populate("userId", "name email")
-      .limit(sanitizedLimit)
-      .skip(sanitizedSkip);
-
-    const total = await AuditLog.countDocuments(query);
 
     res.json({
       success: true,
