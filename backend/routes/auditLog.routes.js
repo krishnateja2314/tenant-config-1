@@ -21,6 +21,7 @@ const getPagination = (limit, skip) => {
   };
 };
 
+// Strict type checking ensures objects/arrays aren't passed through
 const sanitizeStudentId = (studentId) =>
   typeof studentId === "string" && studentId.trim()
     ? studentId.trim()
@@ -39,18 +40,21 @@ const fetchAuditLogs = async ({
   limit,
   skip,
 }) => {
-  // Construct query object explicitly with sanitized values
-  const query = { tenantId: toObjectId(tenantId) };
+  // Fix: Construct query object using explicit $eq operators to prevent NoSQL Operator Injection
+  const query = { tenantId: { $eq: toObjectId(tenantId) } };
+  
   if (domainId) {
-    query.domainId = toObjectId(domainId);
+    query.domainId = { $eq: toObjectId(domainId) };
   }
+  
   const cleanStudentId = sanitizeStudentId(studentId);
   if (cleanStudentId) {
-    query.studentId = cleanStudentId;
+    query.studentId = { $eq: cleanStudentId };
   }
+  
   const cleanDecision = sanitizeDecision(decision);
   if (cleanDecision) {
-    query.decision = cleanDecision;
+    query.decision = { $eq: cleanDecision };
   }
 
   const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
@@ -292,7 +296,8 @@ router.get("/:tenantId/stats/summary", async (req, res) => {
 
     const tenantObjectId = toObjectId(tenantId);
     const stats = await AuditLog.aggregate([
-      { $match: { tenantId: tenantObjectId } },
+      // Fix: Apply $eq in aggregation match as well
+      { $match: { tenantId: { $eq: tenantObjectId } } },
       {
         $group: {
           _id: "$decision",
@@ -302,7 +307,8 @@ router.get("/:tenantId/stats/summary", async (req, res) => {
     ]);
 
     const totalRequests = await AuditLog.countDocuments({
-      tenantId: tenantObjectId,
+      // Fix: Apply $eq in countDocuments
+      tenantId: { $eq: tenantObjectId },
     });
 
     const allowed = stats.find((s) => s._id === "ALLOWED")?.count || 0;
