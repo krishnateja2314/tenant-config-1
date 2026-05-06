@@ -31,16 +31,6 @@ const sanitizeDecision = (decision) =>
     ? decision
     : undefined;
 
-const buildAuditLogQuery = ({ tenantId, domainId, studentId, decision }) => {
-  const query = { tenantId: toObjectId(tenantId) };
-  if (domainId) query.domainId = toObjectId(domainId);
-  const cleanStudentId = sanitizeStudentId(studentId);
-  if (cleanStudentId) query.studentId = cleanStudentId;
-  const cleanDecision = sanitizeDecision(decision);
-  if (cleanDecision) query.decision = cleanDecision;
-  return query;
-};
-
 const fetchAuditLogs = async ({
   tenantId,
   domainId,
@@ -49,12 +39,20 @@ const fetchAuditLogs = async ({
   limit,
   skip,
 }) => {
-  const query = buildAuditLogQuery({
-    tenantId,
-    domainId,
-    studentId,
-    decision,
-  });
+  // Construct query object explicitly with sanitized values
+  const query = { tenantId: toObjectId(tenantId) };
+  if (domainId) {
+    query.domainId = toObjectId(domainId);
+  }
+  const cleanStudentId = sanitizeStudentId(studentId);
+  if (cleanStudentId) {
+    query.studentId = cleanStudentId;
+  }
+  const cleanDecision = sanitizeDecision(decision);
+  if (cleanDecision) {
+    query.decision = cleanDecision;
+  }
+
   const { limit: sanitizedLimit, skip: sanitizedSkip } = getPagination(
     limit,
     skip,
